@@ -8,6 +8,9 @@ from libaml.aml import AML
 from libaml.aml import ResTypes
 
 
+INDENT_BLOCK = '  '
+
+
 if __name__ == '__main__':
     opts, args = getopt.getopt(sys.argv[1:], 'i:')
     params = dict([(i.lstrip('-'), j) for i, j in opts])
@@ -23,13 +26,16 @@ if __name__ == '__main__':
 
     aml = AML(buf)
     namespaces = []
+    indent = 0
     while aml.hasnext():
         header, body = aml.next()
         if header.type == ResTypes.RES_XML_START_ELEMENT_TYPE:
-            print('<%s%s>' % (body.nodename, ''.join(namespaces + [' %s="%s"' % (i, i.typedValue.value) for i in body.attributes])))
+            print(INDENT_BLOCK * indent + '<%s%s>' % (body.nodename, ''.join(namespaces + [' %s="%s"' % (i, i.typedValue.value) for i in body.attributes])))
             namespaces = []
+            indent += 1
         elif header.type == ResTypes.RES_XML_END_ELEMENT_TYPE:
-            print('</%s>' % body.nodename)
+            indent -= 1
+            print(INDENT_BLOCK * indent + '</%s>' % body.nodename)
         elif header.type == ResTypes.RES_XML_START_NAMESPACE_TYPE:
             namespaces.append(' xmlns:%s="%s"' % (body.name, body.namespace))
         elif header.type == ResTypes.RES_XML_TYPE:
