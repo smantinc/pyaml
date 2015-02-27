@@ -325,7 +325,7 @@ class AML:
                              self._bytebuffer.tobytes()])
 
     class ResourceMapChunk:
-        ATTRS = eval(pkgutil.get_data('aml', 'android-attrs.json'))
+        ATTRS = eval(pkgutil.get_data('libaml', 'android-attrs.json'))
         def __init__(self, header, strings):
             self._header = header
             idlen = int((header.chunkSize - header.headerSize) / 4)

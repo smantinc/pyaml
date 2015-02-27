@@ -4,8 +4,8 @@
 import sys
 import getopt
 
-from ..aml.aml import AML
-from ..aml.aml import ResTypes
+from libaml.aml import AML
+from libaml.aml import ResTypes
 
 
 if __name__ == '__main__':
