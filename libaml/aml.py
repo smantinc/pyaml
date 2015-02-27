@@ -500,8 +500,9 @@ class AML:
             return bos.tobytes()
 
     class InsertedPlaceHolder:
-        def __init__(self, aml):
+        def __init__(self, aml, node):
             self._aml = aml
+            self._node = node
             self._bytebuffer = ByteArrayBuffer()
 
         def append(self, data):
@@ -514,14 +515,14 @@ class AML:
         def tobytes(self):
             return self._bytebuffer.tobytes()
 
-        def writexmlstartelement(self, linenumber, name, attrs):
+        def writexmlstartelement(self, name, attrs, linenumber=0):
             stringpool = self._aml.stringpool
             self._aml.stringpool.ensure(name)
             attrExt = ResXMLTree_attrExt.create(ResourceRef.create(AML.NONE_NAMESPACE_REF, stringpool=stringpool),
                                                 ResourceRef.create(stringpool=stringpool, value=name),
                                                 20, 20, len(attrs), 0, 0, 0)
             element = ResXMLTree.create(ResChunk.Header.create(ResTypes.RES_XML_START_ELEMENT_TYPE, 16, 0),
-                                        ResXMLTree_node.create(linenumber, 0xffffffff),
+                                        ResXMLTree_node.create(linenumber or self._node.lineNumber, 0xffffffff),
                                         attrExt, aml=self)
             androidns = ResourceRef(stringpool=stringpool, value=AML.ANDROID_NAMESPACE)
             for k, v in attrs.items():
@@ -532,9 +533,9 @@ class AML:
             self._bytebuffer.append(element)
             return element
 
-        def writexmlendelement(self, linenumber, name):
+        def writexmlendelement(self, name, linenumber=0):
             self._bytebuffer.append(ResChunk.Header.create(ResTypes.RES_XML_END_ELEMENT_TYPE, 16, 24))
-            self._bytebuffer.append(ResXMLTree_node.create(linenumber, 0xffffffff))
+            self._bytebuffer.append(ResXMLTree_node.create(linenumber or self._node.lineNumber, 0xffffffff))
             self._bytebuffer.append(struct.pack('I', 0xffffffff))
             self._bytebuffer.append(ResourceRef(self._aml.stringpool, name))
 
@@ -555,7 +556,7 @@ class AML:
         self._header, self._body = ResChunk.Header.parse(buffer, buffer=buffer)
         self._rootchunk = AML.Chunk(self._header)
         self._bufptr = self._rootchunk.body
-        self._nextisheader = True
+        self._firstchunk = True
 
     @property
     def stringpool(self):
@@ -570,51 +571,54 @@ class AML:
         return self._namespaces
 
     def hasnext(self):
-        return self._nextisheader or len(self._bufptr) > 0
+        return self._firstchunk or len(self._bufptr) > 0
 
     def next(self):
-        if self._nextisheader:
-            self._nextisheader = False
+        if self._firstchunk:
+            self._firstchunk = False
             return self._header, self._body
-        header, chunk = ResChunk.parse(self._bufptr)
-        body = header.getbody()
-        if header.type == ResTypes.RES_STRING_POOL_TYPE:
+        self._header, chunk = ResChunk.parse(self._bufptr)
+        self._body = self._header.getbody()
+        if self._header.type == ResTypes.RES_STRING_POOL_TYPE:
             self._stringpool = AML.StringPoolChunk(self._bufptr)
             self._strings = AML.StringList(self._stringpool.strings)
             self._rootchunk.append(self._stringpool)
-        elif header.type == ResTypes.RES_XML_START_NAMESPACE_TYPE:
-            body, nul = AML.XMLNamespace.parse(header.getbody(), stringpool=self._stringpool)
-            self._namespaces[body.namespace] = body.name
-            self._rootchunk.append(header.tobytesbybuf())
-            self._rootchunk.append(body)
-        elif header.type == ResTypes.RES_XML_START_ELEMENT_TYPE:
-            body, nul = ResXMLTree.parse(self._bufptr, aml=self, stringpool=self._stringpool)
-            self._rootchunk.append(body)
-            buf = header.getbody()[body.attrExt.attributeStart:]
-            for i in range(body.attrExt.attributeCount):
+        elif self._header.type == ResTypes.RES_XML_START_NAMESPACE_TYPE:
+            self._body, nul = AML.XMLNamespace.parse(self._header.getbody(), stringpool=self._stringpool)
+            self._namespaces[self._body.namespace] = self._body.name
+            self._rootchunk.append(self._header.tobytesbybuf())
+            self._rootchunk.append(self._body)
+        elif self._header.type == ResTypes.RES_XML_START_ELEMENT_TYPE:
+            self._body, nul = ResXMLTree.parse(self._bufptr, aml=self, stringpool=self._stringpool)
+            self._rootchunk.append(self._body)
+            buf = self._header.getbody()[self._body.attrExt.attributeStart:]
+            for i in range(self._body.attrExt.attributeCount):
                 attribute, p = ResXMLTree_attribute.parse(buf, stringpool=self._stringpool, aml=self)
-                body.attributes.append(attribute)
-                buf = buf[body.attrExt.attributeSize:]
-        elif header.type == ResTypes.RES_XML_END_ELEMENT_TYPE:
+                self._body.attributes.append(attribute)
+                buf = buf[self._body.attrExt.attributeSize:]
+        elif self._header.type == ResTypes.RES_XML_END_ELEMENT_TYPE:
             node, nul = ResXMLTree_node.parse(self._bufptr[8:])
-            ns, name = parsestruct(header.getbody(), 'II')
-            body = ResXMLElement(node, self._stringpool, None, self._strings[name])
-            self._rootchunk.append(header.tobytesbybuf())
-            self._rootchunk.append(body)
-        elif header.type == ResTypes.RES_XML_END_NAMESPACE_TYPE:
-            body, nul = AML.XMLNamespace.parse(header.getbody(), stringpool=self._stringpool)
-            self._rootchunk.append(header.tobytesbybuf())
-            self._rootchunk.append(body)
-        elif header.type == ResTypes.RES_XML_RESOURCE_MAP_TYPE:
-            self._stringpool.resourcemap = AML.ResourceMapChunk(header, self._strings)
+            ns, name = parsestruct(self._header.getbody(), 'II')
+            self._body = ResXMLElement(node, self._stringpool, None, self._strings[name])
+            self._rootchunk.append(self._header.tobytesbybuf())
+            self._rootchunk.append(self._body)
+        elif self._header.type == ResTypes.RES_XML_END_NAMESPACE_TYPE:
+            self._body, nul = AML.XMLNamespace.parse(self._header.getbody(), stringpool=self._stringpool)
+            self._rootchunk.append(self._header.tobytesbybuf())
+            self._rootchunk.append(self._body)
+        elif self._header.type == ResTypes.RES_XML_RESOURCE_MAP_TYPE:
+            self._stringpool.resourcemap = AML.ResourceMapChunk(self._header, self._strings)
             self._rootchunk.append(self._stringpool.resourcemap)
         else:
             self._rootchunk.append(chunk)
-        self._bufptr = header.getnextchunkbuf()
-        return header, body
+        self._bufptr = self._header.getnextchunkbuf()
+        return self._header, self._body
 
     def insert(self):
-        inserted = AML.InsertedPlaceHolder(self)
+        try:
+            inserted = AML.InsertedPlaceHolder(self, self._body.node)
+        except AttributeError:
+            raise AssertionError('Cannot insert after none xml node types!')
         self._rootchunk.append(inserted)
         return inserted
 
