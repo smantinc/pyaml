@@ -405,10 +405,8 @@ class AML:
                 return sum([len(i) + 3 for i in self._aml.strings])
 
         def __init__(self, buf):
-            self._strings = []
-            self._indices = {}
             self._resourcemap = None
-            self.header, nul = ResChunk.Header.parse(buf, buffer=buf)
+            self._header, self._body = ResChunk.Header.parse(buf, buffer=buf)
             self.stringCount, self.styleCount, self.flags, self.stringsStart, self.stylesStart = parsestruct(buf[8:], '5I')
             self._stringlist = self._UTF8StringList(self) if self.flags & AML.StringPoolChunk.UTF8_FLAG else self._UTF16StringList(self)
             self._strings, self._indices = self._stringlist.loadstrings(buf[self.stringsStart:])
@@ -449,11 +447,11 @@ class AML:
             return self.attrs[ref] if ref < attrslen else self._strings[ref - attrslen]
 
         def stringslen(self):
-            return sum([len(i) * 2 + 4 for i in self.strings]) + self.stringCount * 4 + self.header.headerSize
+            return sum([len(i) * 2 + 4 for i in self.strings]) + self.stringCount * 4 + self._header.headerSize
 
         def _append(self, s):
             self.stringCount += 1
-            self.stringsStart = self.stringCount * 4 + self.header.headerSize
+            self.stringsStart = self.stringCount * 4 + self._header.headerSize
 
         def _rebuildindices(self):
             self._indices = dict((j, i) for i, j in enumerate(self.strings))
@@ -474,9 +472,9 @@ class AML:
 
         def tobytes(self):
             bos = ByteArrayBuffer()
-            bos.append(self.header)
+            bos.append(self._header)
             self.stringCount = (0 if self._resourcemap is None else len(self._resourcemap.attrs)) + len(self._strings)
-            self.stringsStart = self.stringCount * 4 + self.header.headerSize
+            self.stringsStart = self.stringCount * 4 + self._header.headerSize
             bos.append(struct.pack('5I', self.stringCount, self.styleCount, self.flags,
                                    self.stringsStart, self.stylesStart))
 
@@ -496,9 +494,9 @@ class AML:
             bos.append(struct.pack(str(self.stringCount) + 'I', *stringmaps))
             for i in strings:
                 bos.append(struct.pack(str(len(i) + 2) + 'H', *([len(i)] + [ord(j) for j in i] + [0])))
-            self.header.chunkSize = self.size
+            self._header.chunkSize = self.size
             stringslen = self.stringslen()
-            bos.append(b'\x00' * (self.header.chunkSize - stringslen))
+            bos.append(b'\x00' * (self._header.chunkSize - stringslen))
             return bos.tobytes()
 
     class InsertedPlaceHolder:
@@ -554,9 +552,10 @@ class AML:
         self._namespaces = {}
         self._stringpool = None
         self._strings = None
-        header, nul = ResChunk.Header.parse(buffer, buffer=buffer)
-        self._rootchunk = AML.Chunk(header)
+        self._header, self._body = ResChunk.Header.parse(buffer, buffer=buffer)
+        self._rootchunk = AML.Chunk(self._header)
         self._bufptr = self._rootchunk.body
+        self._nextisheader = True
 
     @property
     def stringpool(self):
@@ -571,9 +570,12 @@ class AML:
         return self._namespaces
 
     def hasnext(self):
-        return len(self._bufptr) > 0
+        return self._nextisheader or len(self._bufptr) > 0
 
     def next(self):
+        if self._nextisheader:
+            self._nextisheader = False
+            return self._header, self._body
         header, chunk = ResChunk.parse(self._bufptr)
         body = header.getbody()
         if header.type == ResTypes.RES_STRING_POOL_TYPE:
