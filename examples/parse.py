@@ -10,6 +10,10 @@ from libaml.aml import ResTypes
 
 INDENT_BLOCK = '  '
 
+"""
+This example demonstrates the basic usage of libaml.
+It parses Android binary xml and prints it to the stdout.
+"""
 
 if __name__ == '__main__':
     opts, args = getopt.getopt(sys.argv[1:], 'i:')
